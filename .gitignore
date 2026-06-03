@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Env / secrets — never commit real tokens
+.env
+*.env
+
+# macOS
+.DS_Store
