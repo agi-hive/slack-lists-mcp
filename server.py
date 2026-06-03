@@ -294,15 +294,30 @@ def _cell_from_explicit(cols: List[Dict[str, Any]], spec: Dict[str, Any]) -> Dic
     raise SlackListError(f"Cell for column '{ref}' has no value.")
 
 
+def _columns_for_scope(schema: Dict[str, Any], scope: str) -> List[Dict[str, Any]]:
+    """scope: 'parent' | 'subtask' | 'any' (union of both, deduped by id)."""
+    if scope == "parent":
+        return schema["schema"]
+    if scope == "subtask":
+        return schema["subtask_schema"]
+    seen, merged = set(), []
+    for c in schema["schema"] + schema["subtask_schema"]:
+        if c["id"] in seen:
+            continue
+        seen.add(c["id"])
+        merged.append(c)
+    return merged
+
+
 async def _build_cells(
     list_id: str,
-    for_subtasks: bool,
+    scope: str,
     title: Optional[str],
     fields: Optional[Dict[str, Any]],
     cells: Optional[List[Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
     schema = await _get_schema(list_id)
-    cols = _columns(schema, for_subtasks)
+    cols = _columns_for_scope(schema, scope)
     out: List[Dict[str, Any]] = []
     if title is not None:
         pc = _primary_column(cols)
@@ -508,7 +523,7 @@ async def slack_lists_get_item(
 
 async def _create_one(list_id: str, parent_item_id: Optional[str], title: Optional[str],
                       fields: Optional[Dict[str, Any]], cells: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
-    initial = await _build_cells(list_id, parent_item_id is not None, title, fields, cells)
+    initial = await _build_cells(list_id, "subtask" if parent_item_id else "parent", title, fields, cells)
     payload: Dict[str, Any] = {"list_id": list_id}
     if parent_item_id:
         payload["parent_item_id"] = parent_item_id
@@ -615,8 +630,8 @@ async def slack_lists_update_item(
     try:
         if not fields and not cells:
             raise SlackListError("Provide `fields` (e.g. {\"Status\":\"Done\"}) or `cells`.")
-        is_sub = False  # cells must reference valid columns; try parent schema first, subtask cols are a superset in cache
-        built = await _build_cells(list_id, is_sub, None, fields, cells)
+        # Resolve against both parent + subtask columns so updating either kind works by name.
+        built = await _build_cells(list_id, "any", None, fields, cells)
         for c in built:
             c["row_id"] = item_id
         await _slack_post("slackLists.items.update", {"list_id": list_id, "cells": built})
