@@ -1,9 +1,10 @@
 # Slack Lists MCP
 
 A custom [MCP](https://modelcontextprotocol.io) server that lets an AI assistant (Claude
-and other MCP clients) fully work with **Slack Lists** — including **subtasks**, which the
-built-in Slack connector cannot do. Tasks live in Slack Lists; the assistant creates, reads,
-updates, and nests them via the official Slack Lists API.
+and other MCP clients) fully work with **Slack Lists** — including **subtasks** and **comments**,
+which the built-in Slack connector cannot do. Tasks live in Slack Lists; the assistant creates,
+reads, updates and nests them via the official Slack Lists API, and reads the discussion under
+any card.
 
 Works on **macOS, Windows, and Linux** (pure Python, stdio transport).
 
@@ -128,6 +129,34 @@ then add an entry under `mcpServers` (this is also the format for `claude_deskto
 
 Save, then restart the server (toggle it off/on, or restart the app). It should show **running**.
 
+**Claude Code (CLI):** one command with the same two paths; `--scope user` makes the server
+available in every project:
+
+```bash
+claude mcp add --scope user slack_lists \
+  -e SLACK_LISTS_TOKEN="xoxp-...your token..." \
+  -- /absolute/path/to/slack-lists-mcp/.venv/bin/python /absolute/path/to/slack-lists-mcp/server.py
+```
+
+`claude mcp list` should then show `slack_lists` as connected.
+
+**Other MCP clients** (Cursor, Windsurf, …) accept the same `mcpServers` JSON block as above.
+
+## Upgrading from 1.0.x
+
+1. Pull or download the new `server.py`, `test_connection.py` and `README.md`. There are no new
+   dependencies, but run `./.venv/bin/pip install -r requirements.txt` once so that `mcp` is at least 1.7.0.
+2. In your Slack app open **OAuth & Permissions** → **User Token Scopes** and add `groups:history` and
+   `users:read` (plus `channels:history` if a List of yours lives in a public channel) →
+   **Reinstall to Workspace** → **Allow**.
+3. Copy the User OAuth Token shown afterwards. If it differs from the one in your client config,
+   update `SLACK_LISTS_TOKEN`.
+4. Restart the MCP server (toggle it in the client, or restart the app).
+   `./.venv/bin/python test_connection.py F0123ABCD` should end with `OK - comments reachable`.
+
+Without the new scopes everything from 1.0 keeps working; only the comment tools answer with a
+`missing_scope` hint.
+
 ## How fields work — set them by name
 
 Set fields by **human column names and labels**; the server resolves column IDs, types, and
@@ -203,6 +232,22 @@ This server does that lookup for you:
 - Comment text is Slack markdown; mentions arrive raw as `<@U123>`.
 - Reading comments is all this server does — **posting a comment is not supported**, because
   Slack's Lists API has no method for it.
+
+## Troubleshooting
+
+- **`missing_scope`** — the token lacks the scope named in the error. Add it under **User Token Scopes**,
+  reinstall the app, update `SLACK_LISTS_TOKEN` if the token changed, restart the server.
+- **`channel_not_found` from a comment tool** — the List id is wrong, or the token's user has no access to
+  that List. Pass the `F…` id; the server maps it to the `C…` channel itself.
+- **`CERTIFICATE_VERIFY_FAILED`** — a python.org build of Python on macOS uses the system trust store, which
+  is empty until `Install Certificates.command` (in the Python folder under Applications) has been run.
+  `server.py` and `test_connection.py` go through httpx with certifi's bundle, so run both with the venv Python.
+- **The client shows the server as failed or not running** — both paths in the config must be absolute
+  (Windows: `Scripts\python.exe`, with double backslashes inside the JSON). Start it by hand with
+  `./.venv/bin/python server.py`: it should start without a traceback and wait for input (Ctrl+C stops it).
+  A traceback there is the real error.
+- **The server starts but tools are missing or it fails on import** — `./.venv/bin/pip install -r requirements.txt`
+  (the tool annotations need `mcp>=1.7.0`).
 
 ## Notes & limits
 
