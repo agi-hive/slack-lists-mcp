@@ -2,20 +2,33 @@
 """
 Quick connectivity test for the Slack Lists MCP token.
 
-Usage:
+Usage (run it with the project venv so httpx is available):
     export SLACK_LISTS_TOKEN="xoxp-..."   # token with lists:read + lists:write
-    python test_connection.py [LIST_ID]
+    ./.venv/bin/python test_connection.py [LIST_ID]
 
 - With no LIST_ID: verifies the token via auth.test.
-- With a LIST_ID:  also reads the first few items of that list (incl. subtasks).
+- With a LIST_ID:  also reads the first few items of that list (incl. subtasks),
+                   and checks that comments are reachable (needs groups:history).
+
+The test talks to Slack through httpx, exactly like server.py does, so it trusts
+the same CA bundle (certifi). The standard library's urllib uses the OS trust
+store instead, which python.org builds of Python for macOS leave empty until
+"Install Certificates.command" is run — that showed up as CERTIFICATE_VERIFY_FAILED.
 """
-import json
 import os
 import sys
-import urllib.request
+
+try:
+    import httpx
+except ImportError:  # pragma: no cover - only hit outside the venv
+    sys.exit("ERROR: httpx is not installed. Run this with the project venv: "
+             "./.venv/bin/python test_connection.py  (pip install -r requirements.txt first)")
+
+SLACK_API = "https://slack.com/api"
+TIMEOUT = 30.0
 
 
-def slack_post(method: str, payload: dict) -> dict:
+def _token() -> str:
     token = (
         os.environ.get("SLACK_LISTS_TOKEN")
         or os.environ.get("SLACK_USER_TOKEN")
@@ -23,16 +36,23 @@ def slack_post(method: str, payload: dict) -> dict:
     )
     if not token:
         sys.exit("ERROR: set SLACK_LISTS_TOKEN to a token with lists:read + lists:write.")
-    req = urllib.request.Request(
-        f"https://slack.com/api/{method}",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json; charset=utf-8",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read().decode("utf-8"))
+    return token
+
+
+def _headers() -> dict:
+    return {"Authorization": f"Bearer {_token()}"}
+
+
+def slack_post(method: str, payload: dict) -> dict:
+    r = httpx.post(f"{SLACK_API}/{method}", json=payload, headers=_headers(), timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()
+
+
+def slack_get(method: str, params: dict) -> dict:
+    r = httpx.get(f"{SLACK_API}/{method}", params=params, headers=_headers(), timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()
 
 
 def main() -> None:
@@ -57,6 +77,20 @@ def main() -> None:
                     title = f["text"]
                     break
             print(f"  - {it.get('id')}{sub}: {title}")
+
+        # Comments live in the channel that backs the List: same id, 'F' -> 'C'.
+        channel = "C" + list_id[1:]
+        history = slack_get("conversations.history", {"channel": channel, "limit": 200})
+        if not history.get("ok"):
+            err = history.get("error")
+            hint = " (add groups:history to the token and reinstall the app)" if err == "missing_scope" else ""
+            print(f"WARN - comments unreachable for {list_id}: {err}{hint}")
+            return
+        threads = [m for m in history.get("messages", []) or []
+                   if m.get("subtype") == "list_record_comment"]
+        discussed = [m for m in threads if (m.get("reply_count") or 0) > 0]
+        print(f"OK - comments reachable: {len(threads)} thread(s) on this page, "
+              f"{len(discussed)} with comments")
 
 
 if __name__ == "__main__":
