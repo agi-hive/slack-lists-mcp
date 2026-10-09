@@ -217,6 +217,10 @@ This server does that lookup for you:
 - **Keep your token secret.** Anyone with it can read/write your Lists. Prefer storing it in the
   client's `env` config rather than committing it anywhere.
 
+## Changelog
+
+What changed between versions is tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
