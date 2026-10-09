@@ -13,8 +13,10 @@ Works on **macOS, Windows, and Linux** (pure Python, stdio transport).
 |------|---------|
 | `slack_lists_create_list` | Create a List (task list via `todo_mode`, or a custom column schema) |
 | `slack_lists_get_columns` | List columns + types + **all select options** (`{value,label}`); also `subtask_columns` |
-| `slack_lists_get_items` | Read items **incl. subtasks**, compact projection, column filter, pagination |
-| `slack_lists_get_item` | Read one item |
+| `slack_lists_get_items` | Read items **incl. subtasks**, compact projection, column filter, pagination, optional comment counts |
+| `slack_lists_get_item` | Read one item, optionally with its comment thread |
+| `slack_lists_get_comments` | **Read the comments** of one item **or subtask** — Slack has no comments API |
+| `slack_lists_get_all_comments` | **Every discussion in a List** in one call, grouped by item |
 | `slack_lists_create_item` | Create a top-level item (fields by column **name**, select by **label**) |
 | `slack_lists_create_subtask` | **Create a subtask** under a parent item |
 | `slack_lists_create_items` | **Batch**: create many items + their nested subtasks in one call |
@@ -25,6 +27,8 @@ Works on **macOS, Windows, and Linux** (pure Python, stdio transport).
 
 - A Slack workspace on a **paid plan** (Lists are a paid feature).
 - A Slack **user token** with scopes `lists:read`, `lists:write` (and recommended `files:read`).
+  To read comments, add `groups:history` (plus `channels:history` if a List of yours is public)
+  and `users:read` for author names.
 - **Python 3.10+**.
 
 ## 1. Create the Slack app and get a token
@@ -35,6 +39,8 @@ Works on **macOS, Windows, and Linux** (pure Python, stdio transport).
    - `lists:read`
    - `lists:write`
    - `files:read` *(recommended — gives full column names and ALL select options for existing lists)*
+   - `groups:history`, `users:read` *(for comments — see [How comments work](#how-comments-work);
+     add `channels:history` too if any of your Lists lives in a public channel)*
 4. Click **Install to Workspace** → **Allow**.
 5. Copy the **User OAuth Token** (starts with `xoxp-...`). Keep it secret.
 
@@ -44,7 +50,8 @@ Works on **macOS, Windows, and Linux** (pure Python, stdio transport).
 ```json
 {
   "display_information": { "name": "Lists for Claude" },
-  "oauth_config": { "scopes": { "user": ["lists:read", "lists:write", "files:read"] } },
+  "oauth_config": { "scopes": { "user": ["lists:read", "lists:write", "files:read",
+                                         "groups:history", "channels:history", "users:read"] } },
   "settings": { "org_deploy_enabled": false, "socket_mode_enabled": false }
 }
 ```
@@ -166,6 +173,36 @@ users can pass explicit `cells` instead: `[{ "column": "Status", "select": "Done
 `slack_lists_get_items` returns `{id, parent_id, is_subtask, name, fields:{<ColName>:<value>}}`
 with select values shown as labels and rich_text blobs stripped. Use `columns:["Status","Priority"]`
 to fetch only some fields, `limit`/`cursor` to paginate, and `compact:false` for raw fields.
+
+## How comments work
+
+Slack ships **no API method for List comments** — the Lists API returns cells only. But every
+List `F0123ABCD` is also a private channel `C0123ABCD` (same id, first letter swapped), and each
+record that has been commented on owns a thread there. The thread root is a message with
+`subtype: "list_record_comment"` carrying `slack_list.list_record_id`; the replies under it are
+the comments. Subtasks are records too, so they work exactly the same way.
+
+This server does that lookup for you:
+
+```jsonc
+// one card or subtask — same call for both
+{ "list_id": "F0123ABCD", "item_id": "Rec0123ABCDE" }
+
+// → { "item_id": "...", "comment_count": 2, "thread_ts": "...",
+//     "comments": [ { "ts", "time", "user", "user_name", "text", "edited", "permalink" } ] }
+```
+
+- `slack_lists_get_all_comments` walks the whole List in one call and returns only the items that
+  actually have replies, each with its title, so a board can be caught up on at a glance.
+- `slack_lists_get_item` with `include_comments: true` returns the item together with its thread
+  (`comment_limit` caps the number of comments).
+- `slack_lists_get_items` with `include_comment_counts: true` marks which rows carry a discussion.
+- The thread index is cached per process for 2 minutes; pass `refresh: true` right after new
+  comments were posted.
+- An item nobody has commented on returns `comment_count: 0` with a note — never an error.
+- Comment text is Slack markdown; mentions arrive raw as `<@U123>`.
+- Reading comments is all this server does — **posting a comment is not supported**, because
+  Slack's Lists API has no method for it.
 
 ## Notes & limits
 
