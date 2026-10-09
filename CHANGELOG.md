@@ -17,6 +17,8 @@ All notable changes to Slack Lists MCP are documented here. The format follows
 - Comment author names (via `users:read`) and a permalink to every comment.
 - The thread index is cached per process for 2 minutes; `refresh: true` bypasses it.
 - `test_connection.py LIST_ID` also checks that comments are reachable and names the missing scope.
+- README: setup for Claude Code (`claude mcp add`), an upgrade guide from 1.0.x and a troubleshooting
+  section.
 
 ### Changed
 - Compact output takes the item title from the **primary** column only; a long text column such as
@@ -27,6 +29,8 @@ All notable changes to Slack Lists MCP are documented here. The format follows
   so it trusts the same CA bundle as the server. Fixes `CERTIFICATE_VERIFY_FAILED` on python.org
   builds of Python for macOS.
 - README: new scopes and manifest, and a "How comments work" section.
+- `requirements.txt`: `mcp>=1.7.0`, the first SDK release whose `FastMCP.tool` accepts `annotations`.
+  1.0.0 already used them, so an older SDK failed on startup.
 
 ### Scopes
 - Unchanged for Lists: `lists:read`, `lists:write`, recommended `files:read`.
