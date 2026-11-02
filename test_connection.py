@@ -2,9 +2,9 @@
 """
 Quick connectivity test for the Slack Lists MCP token.
 
-Usage (run it with the project venv so httpx is available):
+Usage (run it through uv so httpx is available):
     export SLACK_LISTS_TOKEN="xoxp-..."   # token with lists:read + lists:write
-    ./.venv/bin/python test_connection.py [LIST_ID]
+    uv run test_connection.py [LIST_ID]
 
 - With no LIST_ID: verifies the token via auth.test.
 - With a LIST_ID:  also reads the first few items of that list (incl. subtasks),
@@ -15,25 +15,21 @@ the same CA bundle (certifi). The standard library's urllib uses the OS trust
 store instead, which python.org builds of Python for macOS leave empty until
 "Install Certificates.command" is run — that showed up as CERTIFICATE_VERIFY_FAILED.
 """
+
 import os
 import sys
 
 try:
     import httpx
-except ImportError:  # pragma: no cover - only hit outside the venv
-    sys.exit("ERROR: httpx is not installed. Run this with the project venv: "
-             "./.venv/bin/python test_connection.py  (pip install -r requirements.txt first)")
+except ImportError:  # pragma: no cover - only hit outside the project env
+    sys.exit("ERROR: httpx is not installed. Run this through uv: uv run test_connection.py  (uv sync first)")
 
 SLACK_API = "https://slack.com/api"
 TIMEOUT = 30.0
 
 
 def _token() -> str:
-    token = (
-        os.environ.get("SLACK_LISTS_TOKEN")
-        or os.environ.get("SLACK_USER_TOKEN")
-        or os.environ.get("SLACK_TOKEN")
-    )
+    token = os.environ.get("SLACK_LISTS_TOKEN") or os.environ.get("SLACK_USER_TOKEN") or os.environ.get("SLACK_TOKEN")
     if not token:
         sys.exit("ERROR: set SLACK_LISTS_TOKEN to a token with lists:read + lists:write.")
     return token
@@ -86,11 +82,9 @@ def main() -> None:
             hint = " (add groups:history to the token and reinstall the app)" if err == "missing_scope" else ""
             print(f"WARN - comments unreachable for {list_id}: {err}{hint}")
             return
-        threads = [m for m in history.get("messages", []) or []
-                   if m.get("subtype") == "list_record_comment"]
+        threads = [m for m in history.get("messages", []) or [] if m.get("subtype") == "list_record_comment"]
         discussed = [m for m in threads if (m.get("reply_count") or 0) > 0]
-        print(f"OK - comments reachable: {len(threads)} thread(s) on this page, "
-              f"{len(discussed)} with comments")
+        print(f"OK - comments reachable: {len(threads)} thread(s) on this page, {len(discussed)} with comments")
 
 
 if __name__ == "__main__":
