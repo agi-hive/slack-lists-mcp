@@ -24,13 +24,17 @@ Works on **macOS, Windows, and Linux** (pure Python, stdio transport).
 | `slack_lists_update_item` | Update cells by name/label (status, assignee, due date, text…) |
 | `slack_lists_delete_item` | Delete an item/subtask |
 
+Failures come back as proper MCP tool errors (`isError: true`) with a message that says what to fix
+(which column or option was wrong and what is available, which scope is missing, …).
+
 ## Requirements
 
 - A Slack workspace on a **paid plan** (Lists are a paid feature).
 - A Slack **user token** with scopes `lists:read`, `lists:write` (and recommended `files:read`).
   To read comments, add `groups:history` (plus `channels:history` if a List of yours is public)
   and `users:read` for author names.
-- **Python 3.10+**.
+- **Python 3.10+** and [**uv**](https://docs.astral.sh/uv/) (recommended — it installs the exact
+  dependency versions from `uv.lock`). Plain `pip` works too, see below.
 
 ## 1. Create the Slack app and get a token
 
@@ -58,45 +62,61 @@ Works on **macOS, Windows, and Linux** (pure Python, stdio transport).
 ```
 </details>
 
-## 2. Install dependencies (virtual environment)
+## 2. Install
 
-**macOS / Linux**
+Clone the repository and let uv build the environment from the lockfile (same command on every OS):
+
 ```bash
+git clone https://github.com/agi-hive/slack-lists-mcp.git
 cd slack-lists-mcp
-python3 -m venv .venv
-./.venv/bin/pip install -r requirements.txt
+uv sync
 ```
 
-**Windows (PowerShell)**
-```powershell
-cd slack-lists-mcp
-py -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
+`uv sync` creates `.venv` with exactly the versions recorded in `uv.lock`. Find the full path to `uv`
+now — you need it in step 4 (`which uv` on macOS/Linux, `where uv` on Windows).
+
+<details>
+<summary>Without uv (plain pip)</summary>
+
+```bash
+python3 -m venv .venv
+./.venv/bin/pip install .          # Windows: .\.venv\Scripts\pip install .
 ```
+
+This installs the `slack-lists-mcp` command into the venv; wherever the steps below say
+`uv run --directory <repo> slack-lists-mcp`, use `<repo>/.venv/bin/slack-lists-mcp`
+(Windows: `<repo>\.venv\Scripts\slack-lists-mcp.exe`) instead.
+</details>
 
 ## 3. Test the token
 
 **macOS / Linux**
 ```bash
 export SLACK_LISTS_TOKEN="xoxp-...your token..."
-./.venv/bin/python test_connection.py            # verify token
-./.venv/bin/python test_connection.py F0123ABCD  # optional: read a list
+uv run test_connection.py            # verify token
+uv run test_connection.py F0123ABCD  # optional: read a list and check comments are reachable
 ```
 
 **Windows (PowerShell)**
 ```powershell
 $env:SLACK_LISTS_TOKEN = "xoxp-...your token..."
-.\.venv\Scripts\python test_connection.py
+uv run test_connection.py
 ```
 
 You should see `OK - token valid`.
 
 ## 4. Connect the server to your MCP client
 
-This is a **local (stdio) MCP server** — you point your client at the `server.py` command.
+This is a **local (stdio) MCP server** — your client starts it as a command.
 It is **not** a remote/URL connector, so don't add it under a "Connectors (URL)" screen.
 
-Use the **full absolute path** to the venv Python and to `server.py`.
+The command is `uv run --directory <repo> slack-lists-mcp`. Two rules that avoid 90% of
+"server failed to start" reports:
+
+- Use the **full path to `uv`** (from step 2). Desktop apps don't see your shell's `PATH`, so a bare
+  `uv` often isn't found. Typical: `/opt/homebrew/bin/uv` (macOS, Homebrew), `~/.local/bin/uv`
+  (installer script, write it out as `/Users/you/.local/bin/uv`), `C:\Users\you\.local\bin\uv.exe` (Windows).
+- Use the **absolute path of the cloned repository** in `--directory`.
 
 **Claude desktop / Cowork:** Settings → **Developer** → **Local MCP servers** → **Edit Config**,
 then add an entry under `mcpServers` (this is also the format for `claude_desktop_config.json`):
@@ -106,21 +126,21 @@ then add an entry under `mcpServers` (this is also the format for `claude_deskto
 {
   "mcpServers": {
     "slack_lists": {
-      "command": "/absolute/path/to/slack-lists-mcp/.venv/bin/python",
-      "args": ["/absolute/path/to/slack-lists-mcp/server.py"],
+      "command": "/opt/homebrew/bin/uv",
+      "args": ["run", "--directory", "/absolute/path/to/slack-lists-mcp", "slack-lists-mcp"],
       "env": { "SLACK_LISTS_TOKEN": "xoxp-...your token..." }
     }
   }
 }
 ```
 
-**Windows** (note the `Scripts\python.exe` path and double backslashes)
+**Windows** (double backslashes inside the JSON)
 ```json
 {
   "mcpServers": {
     "slack_lists": {
-      "command": "C:\\path\\to\\slack-lists-mcp\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\path\\to\\slack-lists-mcp\\server.py"],
+      "command": "C:\\Users\\you\\.local\\bin\\uv.exe",
+      "args": ["run", "--directory", "C:\\path\\to\\slack-lists-mcp", "slack-lists-mcp"],
       "env": { "SLACK_LISTS_TOKEN": "xoxp-...your token..." }
     }
   }
@@ -129,33 +149,41 @@ then add an entry under `mcpServers` (this is also the format for `claude_deskto
 
 Save, then restart the server (toggle it off/on, or restart the app). It should show **running**.
 
-**Claude Code (CLI):** one command with the same two paths; `--scope user` makes the server
-available in every project:
+**Claude Code (CLI):** one command; `--scope user` makes the server available in every project:
 
 ```bash
 claude mcp add --scope user slack_lists \
   -e SLACK_LISTS_TOKEN="xoxp-...your token..." \
-  -- /absolute/path/to/slack-lists-mcp/.venv/bin/python /absolute/path/to/slack-lists-mcp/server.py
+  -- uv run --directory /absolute/path/to/slack-lists-mcp slack-lists-mcp
 ```
 
 `claude mcp list` should then show `slack_lists` as connected.
 
 **Other MCP clients** (Cursor, Windsurf, …) accept the same `mcpServers` JSON block as above.
 
-## Upgrading from 1.0.x
+## Upgrading
 
-1. Pull or download the new `server.py`, `test_connection.py` and `README.md`. There are no new
-   dependencies, but run `./.venv/bin/pip install -r requirements.txt` once so that `mcp` is at least 1.7.0.
-2. In your Slack app open **OAuth & Permissions** → **User Token Scopes** and add `groups:history` and
+**From 1.1.x or 1.0.x to 1.2:**
+
+1. `git pull`, then `uv sync` (or, without uv, recreate the venv and `pip install .`). 1.2 requires the
+   `mcp` 2.x SDK; the old `requirements.txt` is gone, and an old `.venv` made from it can be deleted.
+2. Change the server command in your client config to `uv run --directory <repo> slack-lists-mcp`
+   as shown in step 4 (the old `.venv/bin/python server.py` form still works if you keep a venv, but
+   the new one survives dependency updates).
+3. Restart the MCP server. Tool names, parameters and behavior are unchanged; errors now arrive as
+   MCP tool errors instead of `{"error": ...}` text.
+
+**From 1.0.x, additionally (comments):**
+
+1. In your Slack app open **OAuth & Permissions** → **User Token Scopes** and add `groups:history` and
    `users:read` (plus `channels:history` if a List of yours lives in a public channel) →
    **Reinstall to Workspace** → **Allow**.
-3. Copy the User OAuth Token shown afterwards. If it differs from the one in your client config,
+2. Copy the User OAuth Token shown afterwards. If it differs from the one in your client config,
    update `SLACK_LISTS_TOKEN`.
-4. Restart the MCP server (toggle it in the client, or restart the app).
-   `./.venv/bin/python test_connection.py F0123ABCD` should end with `OK - comments reachable`.
+3. `uv run test_connection.py F0123ABCD` should end with `OK - comments reachable`.
 
-Without the new scopes everything from 1.0 keeps working; only the comment tools answer with a
-`missing_scope` hint.
+Without the comment scopes everything else keeps working; only the comment tools answer with a
+`missing_scope` hint (and `get_item`/`get_items` return the item plus a `comments_error`).
 
 ## How fields work — set them by name
 
@@ -235,19 +263,28 @@ This server does that lookup for you:
 
 ## Troubleshooting
 
+- **Where are the logs?** The server writes diagnostics to **stderr**, never to stdout. Claude desktop
+  keeps them in `~/Library/Logs/Claude/mcp-server-slack_lists.log` (macOS) or
+  `%APPDATA%\Claude\logs\` (Windows). The first line on startup names the version, the SDK version and
+  whether a token was found. Set `"SLACK_LISTS_LOG_LEVEL": "DEBUG"` in the `env` block to log every
+  Slack call.
 - **`missing_scope`** — the token lacks the scope named in the error. Add it under **User Token Scopes**,
   reinstall the app, update `SLACK_LISTS_TOKEN` if the token changed, restart the server.
 - **`channel_not_found` from a comment tool** — the List id is wrong, or the token's user has no access to
   that List. Pass the `F…` id; the server maps it to the `C…` channel itself.
+- **HTTP 429 / rate limited** — the server retries automatically (honoring Slack's `Retry-After`, up to
+  3 attempts). If it still fails, wait a minute; `slack_lists_get_all_comments` on a big board is the
+  usual cause — ask for fewer items.
 - **`CERTIFICATE_VERIFY_FAILED`** — a python.org build of Python on macOS uses the system trust store, which
   is empty until `Install Certificates.command` (in the Python folder under Applications) has been run.
-  `server.py` and `test_connection.py` go through httpx with certifi's bundle, so run both with the venv Python.
-- **The client shows the server as failed or not running** — both paths in the config must be absolute
-  (Windows: `Scripts\python.exe`, with double backslashes inside the JSON). Start it by hand with
-  `./.venv/bin/python server.py`: it should start without a traceback and wait for input (Ctrl+C stops it).
+  `server.py` and `test_connection.py` go through httpx with certifi's bundle, so run both with `uv run`.
+- **The client shows the server as failed or not running** — the two paths in the config must be absolute
+  (full path to `uv`, full path to the repo). Start it by hand in a terminal:
+  `uv run --directory /absolute/path/to/slack-lists-mcp slack-lists-mcp` — it should log
+  `slack-lists-mcp 1.2.0 starting …` on stderr and then wait for input (Ctrl+C stops it).
   A traceback there is the real error.
-- **The server starts but tools are missing or it fails on import** — `./.venv/bin/pip install -r requirements.txt`
-  (the tool annotations need `mcp>=1.7.0`).
+- **`ModuleNotFoundError: No module named 'mcp.server.fastmcp'`** — you are running the 1.1 server
+  with the `mcp` 2.x SDK. Pull 1.2 and `uv sync`.
 
 ## Notes & limits
 
@@ -258,9 +295,21 @@ This server does that lookup for you:
   plus assignee/due/completed. The server resolves update fields against both schemas.
 - **Completing a todo** (`todo_completed` column) is sent as a checkbox value; behavior can vary
   by list type — verify on your list and open an issue if it misbehaves.
-- Lists API rate limits are ~20–50 requests/minute depending on the method.
+- Lists API rate limits are ~20–50 requests/minute depending on the method; the server retries 429s.
 - **Keep your token secret.** Anyone with it can read/write your Lists. Prefer storing it in the
   client's `env` config rather than committing it anywhere.
+- **Slack content is data, not instructions.** Cell text and comments are returned verbatim to the
+  model; the server's `instructions` tell the model to treat them as user content.
+
+## Development
+
+```bash
+uv sync                 # installs dev tools too (pytest, ruff)
+uv run pytest           # unit tests, Slack mocked — no token needed
+uv run ruff check . && uv run ruff format --check .
+```
+
+CI runs the same on Python 3.10 and 3.14 for every push and pull request.
 
 ## Changelog
 

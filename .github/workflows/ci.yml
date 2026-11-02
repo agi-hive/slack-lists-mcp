@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: lint + tests (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+      - name: Install (locked)
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Format check
+        run: uv run ruff format --check .
+      - name: Tests
+        run: uv run pytest
+      - name: Server starts on stdio
+        run: |
+          timeout 5 uv run slack-lists-mcp </dev/null >/dev/null 2>stderr.log || code=$?
+          # exit 124 = killed by timeout after starting cleanly, which is what we want
+          if [ "${code:-0}" != "124" ] && [ "${code:-0}" != "0" ]; then cat stderr.log; exit 1; fi
+          grep -q "slack-lists-mcp .* starting" stderr.log || { cat stderr.log; exit 1; }
